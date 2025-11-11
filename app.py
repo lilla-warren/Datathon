@@ -5,13 +5,27 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import io
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, RocCurveDisplay
-import shap
+import sys
 import warnings
 warnings.filterwarnings('ignore')
+
+# Try to import ML dependencies with fallbacks
+try:
+    from sklearn.model_selection import train_test_split
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
+    SKLEARN_AVAILABLE = True
+except ImportError as e:
+    st.error(f"Scikit-learn import error: {e}")
+    SKLEARN_AVAILABLE = False
+
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError as e:
+    st.warning(f"SHAP not available: {e}. Some explainability features will be limited.")
+    SHAP_AVAILABLE = False
 
 # Page configuration
 st.set_page_config(
@@ -52,14 +66,58 @@ st.markdown("""
         border-left: 4px solid #ff6b6b;
         margin: 1rem 0;
     }
+    .warning-box {
+        background-color: #fff3cd;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 4px solid #ffc107;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+def check_dependencies():
+    """Check if all required dependencies are available"""
+    issues = []
+    if not SKLEARN_AVAILABLE:
+        issues.append("Scikit-learn is not available. Machine learning features will not work.")
+    if not SHAP_AVAILABLE:
+        issues.append("SHAP is not available. Some explainability features will be limited.")
+    
+    return issues
+
+def create_roc_curve_manual(y_true, y_pred_proba, model_names):
+    """Manual ROC curve implementation if sklearn is not available"""
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    # Simple implementation - in real scenario, use sklearn
+    ax.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Random Classifier')
+    ax.set_xlabel('False Positive Rate')
+    ax.set_ylabel('True Positive Rate')
+    ax.set_title('ROC Curve (Manual)')
+    ax.legend()
+    ax.grid(True)
+    
+    return fig
 
 def main():
     # Main title
     st.markdown('<h1 class="main-header">🏥 HCT Datathon 2025 - Healthcare Analytics Dashboard</h1>', unsafe_allow_html=True)
     st.markdown("### Transform Data into Knowledge • Promote Informed Decision-Making • Advance Responsible AI")
     
+    # Check dependencies
+    dependency_issues = check_dependencies()
+    if dependency_issues:
+        st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+        st.warning("⚠️ Dependency Warning")
+        for issue in dependency_issues:
+            st.write(f"• {issue}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    if not SKLEARN_AVAILABLE:
+        st.error("❌ Critical dependencies missing. Please check the requirements.txt file.")
+        st.stop()
+
     # Sidebar - File upload and configuration
     with st.sidebar:
         st.header("📁 Data Configuration")
@@ -137,18 +195,23 @@ def perform_analysis(df, target_variable, models_to_run, test_size):
         )
     
     # Create tabs for different analytical perspectives
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab_names = [
         "📊 Descriptive Analytics", 
         "🔍 Diagnostic Analytics", 
         "🤖 Predictive Analytics", 
         "📈 Model Performance",
-        "🔬 Explainability & XAI",
         "💡 Prescriptive Insights",
         "⚖️ Ethics & Responsible AI"
-    ])
+    ]
+    
+    # Add Explainability tab only if SHAP is available
+    if SHAP_AVAILABLE:
+        tab_names.insert(4, "🔬 Explainability & XAI")
+    
+    tabs = st.tabs(tab_names)
     
     # TAB 1: Descriptive Analytics
-    with tab1:
+    with tabs[0]:
         st.markdown('<h2 class="section-header">Descriptive Analytics</h2>', unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
@@ -204,7 +267,7 @@ def perform_analysis(df, target_variable, models_to_run, test_size):
             st.pyplot(fig)
     
     # TAB 2: Diagnostic Analytics
-    with tab2:
+    with tabs[1]:
         st.markdown('<h2 class="section-header">Diagnostic Analytics</h2>', unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
@@ -240,7 +303,7 @@ def perform_analysis(df, target_variable, models_to_run, test_size):
             st.pyplot(fig)
     
     # TAB 3: Predictive Analytics
-    with tab3:
+    with tabs[2]:
         st.markdown('<h2 class="section-header">Predictive Analytics</h2>', unsafe_allow_html=True)
         
         st.subheader("Model Training Configuration")
@@ -293,7 +356,7 @@ def perform_analysis(df, target_variable, models_to_run, test_size):
         st.success(f"🎯 **Best Performing Model:** {best_model['Model']} (AUC: {best_model['ROC-AUC']:.3f})")
     
     # TAB 4: Model Performance
-    with tab4:
+    with tabs[3]:
         st.markdown('<h2 class="section-header">Model Performance Visualization</h2>', unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
@@ -303,6 +366,7 @@ def perform_analysis(df, target_variable, models_to_run, test_size):
             fig, ax = plt.subplots(figsize=(8, 6))
             
             for name, (y_pred, y_pred_proba) in predictions.items():
+                from sklearn.metrics import RocCurveDisplay
                 RocCurveDisplay.from_predictions(y_test, y_pred_proba, name=name, ax=ax)
             
             ax.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Random Classifier')
@@ -322,73 +386,68 @@ def perform_analysis(df, target_variable, models_to_run, test_size):
                        yticklabels=['Actual 0', 'Actual 1'])
             ax.set_title(f'Confusion Matrix - {best_model_name}')
             st.pyplot(fig)
-        
-        # Metrics comparison
-        st.subheader("Performance Metrics Comparison")
-        metrics = ['Accuracy', 'Precision', 'Recall', 'F1-Score', 'ROC-AUC']
-        fig, ax = plt.subplots(figsize=(12, 6))
-        x = np.arange(len(metrics))
-        width = 0.35
-        
-        for i, model in enumerate(results_df['Model']):
-            model_metrics = results_df[results_df['Model'] == model][metrics].values[0]
-            ax.bar(x + i*width, model_metrics, width, label=model)
-        
-        ax.set_xlabel('Metrics')
-        ax.set_ylabel('Score')
-        ax.set_title('Model Performance Metrics Comparison')
-        ax.set_xticks(x + width/2)
-        ax.set_xticklabels(metrics)
-        ax.legend()
-        ax.set_ylim(0, 1)
-        st.pyplot(fig)
     
-    # TAB 5: Explainability & XAI
-    with tab5:
-        st.markdown('<h2 class="section-header">Explainability & XAI</h2>', unsafe_allow_html=True)
-        
-        best_model_name = results_df.loc[results_df['ROC-AUC'].idxmax(), 'Model']
-        best_model = models[best_model_name]
-        
-        with st.spinner("Calculating SHAP values for model explainability..."):
-            # SHAP analysis
-            explainer = shap.TreeExplainer(best_model)
-            shap_values = explainer.shap_values(X_test)
+    # TAB 5: Explainability & XAI (Conditional)
+    if SHAP_AVAILABLE and len(tabs) > 5:
+        with tabs[4]:
+            st.markdown('<h2 class="section-header">Explainability & XAI</h2>', unsafe_allow_html=True)
             
-            col1, col2 = st.columns(2)
+            best_model_name = results_df.loc[results_df['ROC-AUC'].idxmax(), 'Model']
+            best_model_instance = models[best_model_name]
             
-            with col1:
-                st.subheader("SHAP Summary Plot")
-                fig, ax = plt.subplots(figsize=(10, 8))
-                shap.summary_plot(shap_values, X_test, feature_names=X.columns, show=False)
-                plt.tight_layout()
-                st.pyplot(fig)
+            with st.spinner("Calculating SHAP values for model explainability..."):
+                # SHAP analysis
+                explainer = shap.TreeExplainer(best_model_instance)
+                shap_values = explainer.shap_values(X_test)
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("SHAP Summary Plot")
+                    fig, ax = plt.subplots(figsize=(10, 8))
+                    shap.summary_plot(shap_values, X_test, feature_names=X.columns, show=False)
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                
+                with col2:
+                    st.subheader("SHAP Feature Importance")
+                    fig, ax = plt.subplots(figsize=(10, 8))
+                    shap.summary_plot(shap_values, X_test, feature_names=X.columns, plot_type="bar", show=False)
+                    plt.tight_layout()
+                    st.pyplot(fig)
             
-            with col2:
-                st.subheader("SHAP Feature Importance")
-                fig, ax = plt.subplots(figsize=(10, 8))
-                shap.summary_plot(shap_values, X_test, feature_names=X.columns, plot_type="bar", show=False)
-                plt.tight_layout()
-                st.pyplot(fig)
-        
-        st.markdown('<div class="insight-box">', unsafe_allow_html=True)
-        st.subheader("🔍 Model Interpretation")
-        st.write("""
-        **SHAP (SHapley Additive exPlanations) values show:**
-        - **Red points**: High feature values that increase prediction probability
-        - **Blue points**: Low feature values that decrease prediction probability  
-        - **Feature order**: Top features have largest impact on model predictions
-        """)
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('<div class="insight-box">', unsafe_allow_html=True)
+            st.subheader("🔍 Model Interpretation")
+            st.write("""
+            **SHAP (SHapley Additive exPlanations) values show:**
+            - **Red points**: High feature values that increase prediction probability
+            - **Blue points**: Low feature values that decrease prediction probability  
+            - **Feature order**: Top features have largest impact on model predictions
+            """)
+            st.markdown('</div>', unsafe_allow_html=True)
     
-    # TAB 6: Prescriptive Insights
-    with tab6:
+    # Adjust tab indices based on SHAP availability
+    prescriptive_tab_index = 5 if SHAP_AVAILABLE and len(tabs) > 5 else 4
+    ethics_tab_index = 6 if SHAP_AVAILABLE and len(tabs) > 5 else 5
+    
+    # TAB: Prescriptive Insights
+    with tabs[prescriptive_tab_index]:
         st.markdown('<h2 class="section-header">Prescriptive Insights</h2>', unsafe_allow_html=True)
         
-        # Get top features from SHAP
-        shap_mean_abs = np.abs(shap_values).mean(0)
-        top_feature_indices = np.argsort(shap_mean_abs)[-5:][::-1]
-        top_features = X.columns[top_feature_indices].tolist()
+        # Get top features from model
+        best_model_name = results_df.loc[results_df['ROC-AUC'].idxmax(), 'Model']
+        best_model_instance = models[best_model_name]
+        
+        if hasattr(best_model_instance, 'feature_importances_'):
+            feature_importance = pd.DataFrame({
+                'feature': X.columns,
+                'importance': best_model_instance.feature_importances_
+            }).sort_values('importance', ascending=False)
+            top_features = feature_importance.head(5)['feature'].tolist()
+        else:
+            # Fallback: use correlation with target
+            correlations = X.corrwith(y).abs().sort_values(ascending=False)
+            top_features = correlations.head(5).index.tolist()
         
         col1, col2 = st.columns(2)
         
@@ -399,7 +458,8 @@ def perform_analysis(df, target_variable, models_to_run, test_size):
             
             st.subheader("📊 Model Performance Summary")
             st.metric(label="Best Model", value=best_model_name)
-            st.metric(label="ROC-AUC Score", value=f"{best_model['ROC-AUC']:.3f}")
+            best_auc = results_df.loc[results_df['ROC-AUC'].idxmax(), 'ROC-AUC']
+            st.metric(label="ROC-AUC Score", value=f"{best_auc:.3f}")
             st.metric(label="Dataset Size", value=f"{df.shape[0]:,} patients")
         
         with col2:
@@ -427,8 +487,8 @@ def perform_analysis(df, target_variable, models_to_run, test_size):
             </div>
             """, unsafe_allow_html=True)
     
-    # TAB 7: Ethics & Responsible AI
-    with tab7:
+    # TAB: Ethics & Responsible AI
+    with tabs[ethics_tab_index]:
         st.markdown('<h2 class="section-header">Ethics & Responsible AI</h2>', unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
@@ -460,7 +520,7 @@ def perform_analysis(df, target_variable, models_to_run, test_size):
             st.markdown("""
             <div class="metric-card">
             <h4>🔬 Model Explainability</h4>
-            <p>• Implemented SHAP for feature importance analysis<br>
+            <p>• Feature importance analysis conducted<br>
             • Clear documentation of model limitations<br>
             • Performance metrics transparently reported</p>
             </div>
